@@ -16,7 +16,7 @@ const MarkdownResponse = dynamic(() => import("@/components/MarkdownResponse"), 
   loading: () => <p className="text-gray-400 animate-pulse">Загрузка...</p>
 })
 
-const TOKEN_LIMIT = 8000
+const TOKEN_LIMIT = 500000
 const COOLDOWN_SECONDS = 180
 
 export default function Home() {
