@@ -1,13 +1,18 @@
 "use client"
+
 import { useState, useRef, useEffect } from "react"
+import dynamic from "next/dynamic"
 import SearchBar from "@/components/SearchBar"
 import WelcomeScreen from "@/components/WelcomeScreen"
-import MarkdownResponse from "@/components/MarkdownResponse"
 import TokenBar from "@/components/TokenBar"
 
-// Лимит токенов на сессию
+// Динамический импорт чтобы избежать ошибки гидрации
+const MarkdownResponse = dynamic(() => import("@/components/MarkdownResponse"), {
+  ssr: false,
+  loading: () => <p className="text-gray-400">Загрузка...</p>
+})
+
 const TOKEN_LIMIT = 50000
-// Время восстановления в секундах (3 минуты)
 const COOLDOWN_SECONDS = 180
 
 interface Message {
@@ -22,25 +27,30 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [totalTokens, setTotalTokens] = useState(0)
   const [cooldown, setCooldown] = useState(0)
+  const [mounted, setMounted] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const timerRef = useRef<any>(null)
 
+  // Ждём монтирования чтобы избежать hydration mismatch
   useEffect(() => {
-    // Прогреваем backend через наш прокси
+    setMounted(true)
+  }, [])
+
+  // Прогрев backend
+  useEffect(() => {
     fetch("/api/analyze")
       .then(() => console.log("✅ Backend живой!"))
       .catch(() => console.log("⚠️ Backend спит..."))
   }, [])
 
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const timerRef = useRef<any>(null)
-
-  // Таймер обратного отсчета восстановления токенов
+  // Таймер восстановления токенов
   useEffect(() => {
     if (cooldown > 0) {
       timerRef.current = setInterval(() => {
         setCooldown(prev => {
           if (prev <= 1) {
             clearInterval(timerRef.current)
-            setTotalTokens(0) // Сбрасываем токены после ожидания!
+            setTotalTokens(0)
             return 0
           }
           return prev - 1
@@ -50,18 +60,18 @@ export default function Home() {
     return () => clearInterval(timerRef.current)
   }, [cooldown])
 
-  // Скролл вниз при новых сообщениях
+  // Скролл вниз
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth"
-    })
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: "smooth"
+      })
+    }
   }, [messages, loading])
 
   const handleSearch = async (text: string) => {
-    // Если токены исчерпаны И таймер уже идёт - блокируем
     if (totalTokens >= TOKEN_LIMIT && cooldown > 0) return
-    // Если токены исчерпаны и таймера нет - запускаем таймер
     if (totalTokens >= TOKEN_LIMIT) {
       setCooldown(COOLDOWN_SECONDS)
       return
@@ -85,20 +95,26 @@ export default function Home() {
 
       setTotalTokens(prev => {
         const next = prev + (data.tokens_used || 0)
-        // Если после ответа токены кончились - сразу запускаем таймер
         if (next >= TOKEN_LIMIT) setCooldown(COOLDOWN_SECONDS)
         return next
       })
 
       const aiMsg: Message = {
         role: "assistant",
-        content: data.answer,
-        sources: data.sources,
-        isSearch: data.is_search_performed
+        content: data.answer || "Нет ответа",
+        sources: data.sources || [],
+        isSearch: data.is_search_performed || false
       }
       setMessages(prev => [...prev, aiMsg])
+
     } catch (e) {
       console.error(e)
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: "Произошла ошибка. Попробуйте ещё раз.",
+        sources: [],
+        isSearch: false
+      }])
     } finally {
       setLoading(false)
     }
@@ -113,15 +129,22 @@ export default function Home() {
 
   const isBlocked = totalTokens >= TOKEN_LIMIT
 
+  // Пока не смонтировалось — показываем заглушку
+  if (!mounted) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-[#131314]">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-screen bg-[#131314] text-white">
       {/* Шапка */}
-      <header className="flex justify-between items-center px-6 py-3 border-b border-[#2a2a2a] bg-[#131314] z-10">
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-bold">
-            Web<span className="text-blue-500">Mind</span> AI
-          </span>
-        </div>
+      <header className="flex justify-between items-center px-6 py-3 border-b border-[#2a2a2a] bg-[#131314] z-10 flex-shrink-0">
+        <span className="text-lg font-bold">
+          Web<span className="text-blue-500">Mind</span> AI
+        </span>
         <TokenBar
           used={totalTokens}
           limit={TOKEN_LIMIT}
@@ -130,7 +153,7 @@ export default function Home() {
         />
       </header>
 
-      {/* Список сообщений */}
+      {/* Сообщения */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-8">
         <div className="max-w-3xl mx-auto space-y-8">
 
@@ -141,14 +164,12 @@ export default function Home() {
           {messages.map((msg, i) => (
             <div key={i} className="fade-in">
               {msg.role === "user" ? (
-                // Сообщение пользователя
                 <div className="flex justify-end">
                   <div className="bg-[#1e1f20] border border-[#333] px-5 py-3 rounded-2xl max-w-[80%]">
                     <p className="text-white">{msg.content}</p>
                   </div>
                 </div>
               ) : (
-                // Ответ AI
                 <div className="flex gap-3">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex-shrink-0 mt-1" />
                   <div className="flex-1 min-w-0">
@@ -161,14 +182,14 @@ export default function Home() {
 
                     <MarkdownResponse content={msg.content} />
 
-                    {/* Источники */}
                     {msg.sources && msg.sources.length > 0 && (
                       <div className="mt-4 flex flex-wrap gap-2">
-                        {msg.sources.map((s, idx) => (
+                        {msg.sources.map((s: any, idx: number) => (
                           <a
                             key={idx}
                             href={s.url}
                             target="_blank"
+                            rel="noopener noreferrer"
                             className="flex items-center gap-1.5 text-[11px] bg-[#1e1f20] hover:bg-[#282a2d] px-3 py-1.5 rounded-lg border border-[#333] transition-colors max-w-[180px]"
                           >
                             <span className="truncate text-blue-300">{s.title}</span>
@@ -187,9 +208,13 @@ export default function Home() {
             <div className="flex gap-3 fade-in">
               <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex-shrink-0" />
               <div className="flex items-center gap-1 pt-2">
-                <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                {[0, 150, 300].map((delay) => (
+                  <span
+                    key={delay}
+                    className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"
+                    style={{ animationDelay: `${delay}ms` }}
+                  />
+                ))}
               </div>
             </div>
           )}
@@ -197,18 +222,14 @@ export default function Home() {
       </div>
 
       {/* Поле ввода */}
-      <div className="px-4 pb-6 pt-2 bg-[#131314]">
+      <div className="px-4 pb-6 pt-2 bg-[#131314] flex-shrink-0">
         <div className="max-w-3xl mx-auto relative">
-
-          {/* Блокировка при исчерпании токенов */}
           {isBlocked && (
-            <div className="absolute -top-16 left-0 right-0 flex items-center justify-center gap-3 bg-[#1e1f20] border border-yellow-500/30 rounded-xl py-3 px-4">
+            <div className="absolute -top-14 left-0 right-0 flex items-center justify-center bg-[#1e1f20] border border-yellow-500/30 rounded-xl py-3 px-4">
               {cooldown > 0 ? (
-                <>
-                  <span className="text-yellow-400 text-sm">
-                    ⏳ Подождите {Math.floor(cooldown / 60)}:{String(cooldown % 60).padStart(2, "0")} для восстановления токенов
-                  </span>
-                </>
+                <span className="text-yellow-400 text-sm">
+                  ⏳ Подождите {Math.floor(cooldown / 60)}:{String(cooldown % 60).padStart(2, "0")} для восстановления
+                </span>
               ) : (
                 <span className="text-red-400 text-sm">
                   🚫 Лимит исчерпан. Создайте новый чат.
@@ -216,7 +237,6 @@ export default function Home() {
               )}
             </div>
           )}
-
           <SearchBar onSearch={handleSearch} loading={loading || isBlocked} />
         </div>
         <p className="text-[11px] text-center text-gray-600 mt-3">
