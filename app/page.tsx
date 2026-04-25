@@ -22,6 +22,14 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [totalTokens, setTotalTokens] = useState(0)
   const [cooldown, setCooldown] = useState(0)
+
+  useEffect(() => {
+    // Прогреваем backend через наш прокси
+    fetch("/api/analyze")
+      .then(() => console.log("✅ Backend живой!"))
+      .catch(() => console.log("⚠️ Backend спит..."))
+  }, [])
+
   const scrollRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<any>(null)
 
@@ -64,7 +72,7 @@ export default function Home() {
     setLoading(true)
 
     try {
-      const res = await fetch("https://webmind-backend.onrender.com/analyze", {
+      const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
