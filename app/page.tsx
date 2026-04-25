@@ -6,31 +6,29 @@ import SearchBar from "@/components/SearchBar"
 import WelcomeScreen from "@/components/WelcomeScreen"
 import TokenBar from "@/components/TokenBar"
 import Sidebar from "@/components/Sidebar"
+import Canvas from "@/components/Canvas"
 import { useChats } from "@/hooks/useChats"
+import { useCanvas } from "@/hooks/useCanvas"
+import { Code } from "lucide-react"
 
 const MarkdownResponse = dynamic(() => import("@/components/MarkdownResponse"), {
   ssr: false,
   loading: () => <p className="text-gray-400 animate-pulse">Загрузка...</p>
 })
 
-const TOKEN_LIMIT = 1000000
+const TOKEN_LIMIT = 8000
 const COOLDOWN_SECONDS = 180
 
 export default function Home() {
   const {
-    chats,
-    activeChat,
-    activeChatId,
-    setActiveChatId,
-    createChat,
-    deleteChat,
-    addMessage,
-    updateLastMessage,
-    addTokens
+    chats, activeChat, activeChatId,
+    setActiveChatId, createChat, deleteChat,
+    addMessage, updateLastMessage, addTokens
   } = useChats()
 
+  const { canvas, isOpen: canvasOpen, openCanvas, closeCanvas, parseCanvasFromMessage } = useCanvas()
+
   const [loading, setLoading] = useState(false)
-  const [streamingText, setStreamingText] = useState("")
   const [cooldown, setCooldown] = useState(0)
   const [mounted, setMounted] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -39,19 +37,14 @@ export default function Home() {
   useEffect(() => { setMounted(true) }, [])
 
   useEffect(() => {
-    fetch("/api/analyze")
-      .then(() => console.log("✅ Backend живой!"))
-      .catch(console.error)
+    fetch("/api/analyze").catch(console.error)
   }, [])
 
   useEffect(() => {
     if (cooldown > 0) {
       timerRef.current = setInterval(() => {
         setCooldown(prev => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current)
-            return 0
-          }
+          if (prev <= 1) { clearInterval(timerRef.current); return 0 }
           return prev - 1
         })
       }, 1000)
@@ -60,32 +53,21 @@ export default function Home() {
   }, [cooldown])
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth"
-    })
-  }, [activeChat?.messages, loading, streamingText])
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })
+  }, [activeChat?.messages, loading])
 
   const currentTokens = activeChat?.tokensUsed || 0
   const isBlocked = currentTokens >= TOKEN_LIMIT
 
   const handleSearch = async (text: string) => {
     if (isBlocked && cooldown > 0) return
-    if (isBlocked) {
-      setCooldown(COOLDOWN_SECONDS)
-      return
-    }
+    if (isBlocked) { setCooldown(COOLDOWN_SECONDS); return }
 
-    // Создаём чат если нет активного
     let chatId = activeChatId
-    if (!chatId) {
-      chatId = createChat()
-    }
+    if (!chatId) chatId = createChat()
 
-    // Добавляем сообщение пользователя
     addMessage(chatId, { role: "user", content: text })
     setLoading(true)
-    setStreamingText("")
 
     const history = activeChat?.messages.slice(-8) || []
 
@@ -93,11 +75,7 @@ export default function Home() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: text,
-          history,
-          stream: true
-        })
+        body: JSON.stringify({ query: text, history, stream: true })
       })
 
       if (!res.ok) throw new Error("Ошибка сервера")
@@ -110,20 +88,13 @@ export default function Home() {
       let isSearch = false
       let isFirstChunk = true
 
-      // Добавляем пустое сообщение AI которое будем заполнять
-      addMessage(chatId, {
-        role: "assistant",
-        content: "",
-        sources: [],
-        isSearch: false
-      })
+      addMessage(chatId, { role: "assistant", content: "", sources: [], isSearch: false })
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value)
-        const lines = chunk.split("\n")
+        const lines = decoder.decode(value).split("\n")
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue
@@ -140,26 +111,15 @@ export default function Home() {
 
             if (parsed.type === "chunk") {
               fullText += parsed.text
-              setStreamingText(fullText)
-
-              // Обновляем последнее сообщение в чате
               updateLastMessage(chatId!, fullText)
-              
-              if (isFirstChunk) {
-                setLoading(false)
-                isFirstChunk = false
-              }
+              if (isFirstChunk) { setLoading(false); isFirstChunk = false }
             }
 
             if (parsed.type === "done") {
-              // Финальное обновление с источниками
-              addMessage(chatId!, {
-                role: "assistant",
-                content: fullText,
-                sources,
-                isSearch
-              })
-              setStreamingText("")
+              // Проверяем есть ли контент для канваса
+              const canvasContent = parseCanvasFromMessage(fullText)
+              if (canvasContent) openCanvas(canvasContent)
+
               addTokens(chatId!, Math.floor(fullText.length / 4))
             }
           } catch {}
@@ -168,19 +128,14 @@ export default function Home() {
 
     } catch (e) {
       console.error(e)
-      addMessage(chatId!, {
-        role: "assistant",
-        content: "Произошла ошибка. Попробуйте ещё раз.",
-      })
+      addMessage(chatId!, { role: "assistant", content: "Произошла ошибка. Попробуйте ещё раз." })
     } finally {
       setLoading(false)
-      setStreamingText("")
     }
   }
 
   const handleNewChat = () => {
-    const id = createChat()
-    setActiveChatId(id)
+    createChat()
     setCooldown(0)
   }
 
@@ -196,7 +151,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-[#131314] text-white overflow-hidden">
-      
+
       {/* Сайдбар */}
       <Sidebar
         chats={chats}
@@ -206,9 +161,9 @@ export default function Home() {
         onDeleteChat={deleteChat}
       />
 
-      {/* Основной контент */}
-      <div className="flex flex-col flex-1 min-w-0">
-        
+      {/* Чат */}
+      <div className={`flex flex-col transition-all duration-300 ${canvasOpen ? "w-[45%]" : "flex-1"} min-w-0`}>
+
         {/* Шапка */}
         <header className="flex justify-between items-center px-6 py-3 border-b border-[#2a2a2a] flex-shrink-0">
           <span className="text-lg font-bold">
@@ -224,11 +179,9 @@ export default function Home() {
 
         {/* Сообщения */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-8">
-          <div className="max-w-3xl mx-auto space-y-8">
+          <div className="max-w-2xl mx-auto space-y-8">
 
-            {messages.length === 0 && (
-              <WelcomeScreen onPromptClick={handleSearch} />
-            )}
+            {messages.length === 0 && <WelcomeScreen onPromptClick={handleSearch} />}
 
             {messages.map((msg, i) => (
               <div key={i} className="fade-in">
@@ -251,6 +204,20 @@ export default function Home() {
 
                       <MarkdownResponse content={msg.content || "▌"} />
 
+                      {/* Кнопка открыть в канвасе */}
+                      {msg.content && parseCanvasFromMessage(msg.content) && (
+                        <button
+                          onClick={() => {
+                            const c = parseCanvasFromMessage(msg.content)
+                            if (c) openCanvas(c)
+                          }}
+                          className="mt-3 flex items-center gap-2 text-xs text-blue-400 hover:text-blue-300 border border-blue-500/30 hover:border-blue-400/50 px-3 py-1.5 rounded-lg transition-all"
+                        >
+                          <Code size={12} />
+                          Открыть в канвасе
+                        </button>
+                      )}
+
                       {msg.sources && msg.sources.length > 0 && (
                         <div className="mt-4 flex flex-wrap gap-2">
                           {msg.sources.map((s: any, idx: number) => (
@@ -259,9 +226,9 @@ export default function Home() {
                               href={s.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex items-center gap-1.5 text-[11px] bg-[#1e1f20] hover:bg-[#282a2d] px-3 py-1.5 rounded-lg border border-[#333] transition-colors max-w-[180px]"
+                              className="text-[11px] bg-[#1e1f20] hover:bg-[#282a2d] px-3 py-1.5 rounded-lg border border-[#333] transition-colors max-w-[180px] truncate text-blue-300"
                             >
-                              <span className="truncate text-blue-300">{s.title}</span>
+                              {s.title}
                             </a>
                           ))}
                         </div>
@@ -272,17 +239,12 @@ export default function Home() {
               </div>
             ))}
 
-            {/* Индикатор загрузки (пока нет первого чанка) */}
             {loading && (
               <div className="flex gap-3 fade-in">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex-shrink-0" />
                 <div className="flex items-center gap-1 pt-2">
                   {[0, 150, 300].map(delay => (
-                    <span
-                      key={delay}
-                      className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"
-                      style={{ animationDelay: `${delay}ms` }}
-                    />
+                    <span key={delay} className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: `${delay}ms` }} />
                   ))}
                 </div>
               </div>
@@ -292,18 +254,13 @@ export default function Home() {
 
         {/* Поле ввода */}
         <div className="px-4 pb-6 pt-2 flex-shrink-0">
-          <div className="max-w-3xl mx-auto relative">
+          <div className="max-w-2xl mx-auto relative">
             {isBlocked && (
               <div className="absolute -top-14 left-0 right-0 flex items-center justify-center bg-[#1e1f20] border border-yellow-500/30 rounded-xl py-3 px-4">
-                {cooldown > 0 ? (
-                  <span className="text-yellow-400 text-sm">
-                    ⏳ Подождите {Math.floor(cooldown / 60)}:{String(cooldown % 60).padStart(2, "0")} для восстановления
-                  </span>
-                ) : (
-                  <span className="text-red-400 text-sm">
-                    🚫 Лимит исчерпан. Создайте новый чат.
-                  </span>
-                )}
+                {cooldown > 0
+                  ? <span className="text-yellow-400 text-sm">⏳ Подождите {Math.floor(cooldown / 60)}:{String(cooldown % 60).padStart(2, "0")}</span>
+                  : <span className="text-red-400 text-sm">🚫 Лимит исчерпан. Создайте новый чат.</span>
+                }
               </div>
             )}
             <SearchBar onSearch={handleSearch} loading={loading || isBlocked} />
@@ -313,6 +270,13 @@ export default function Home() {
           </p>
         </div>
       </div>
+
+      {/* Канвас — появляется справа */}
+      {canvasOpen && (
+        <div className="w-[55%] flex-shrink-0 transition-all duration-300">
+          <Canvas canvas={canvas} onClose={closeCanvas} />
+        </div>
+      )}
     </div>
   )
 }
