@@ -22,6 +22,13 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [totalTokens, setTotalTokens] = useState(0)
   const [cooldown, setCooldown] = useState(0)
+
+  useEffect(() => {
+    fetch("https://webmind-backend.onrender.com/health")
+      .then(() => console.log("✅ Backend живой!"))
+      .catch(() => console.log("⚠️ Backend спит..."))
+  }, [])
+  
   const scrollRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<any>(null)
 
