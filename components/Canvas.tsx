@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Copy, Check, X, Play, Code, FileText, Eye } from "lucide-react"
+import { Copy, Check, X, Code, Eye, ChevronDown } from "lucide-react"
 import dynamic from "next/dynamic"
 
 const CodeMirror = dynamic(() => import("@uiw/react-codemirror"), { ssr: false })
@@ -26,12 +26,7 @@ export default function Canvas({ canvas, onClose }: Props) {
   useEffect(() => {
     if (canvas) {
       setEditableContent(canvas.content)
-      // Если HTML — сразу показываем превью
-      if (canvas.language === "html") {
-        setActiveTab("preview")
-      } else {
-        setActiveTab("code")
-      }
+      setActiveTab(canvas.language === "html" ? "preview" : "code")
     }
   }, [canvas])
 
@@ -43,85 +38,64 @@ export default function Canvas({ canvas, onClose }: Props) {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const getExtension = async () => {
-    const lang = canvas.language || "text"
-    if (lang === "javascript" || lang === "js") {
-      const { javascript } = await import("@codemirror/lang-javascript")
-      return [javascript()]
-    }
-    if (lang === "html") {
-      const { html } = await import("@codemirror/lang-html")
-      return [html()]
-    }
-    if (lang === "python") {
-      const { python } = await import("@codemirror/lang-python")
-      return [python()]
-    }
-    if (lang === "css") {
-      const { css } = await import("@codemirror/lang-css")
-      return [css()]
-    }
-    return []
-  }
-
   const isHTML = canvas.language === "html"
 
   return (
-    <div className="flex flex-col h-full bg-[#0f0f0f] border-l border-[#2a2a2a]">
-
-      {/* Шапка канваса */}
+    // На мобилке — фиксированный overlay на весь экран
+    // На десктопе — панель справа
+    <div className="
+      fixed md:relative inset-0 md:inset-auto
+      flex flex-col z-50
+      bg-[#0f0f0f] border-l border-[#2a2a2a]
+      w-full md:w-auto
+    ">
+      {/* Шапка */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2a2a] flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Code size={16} className="text-blue-400" />
-            <span className="text-sm font-semibold text-white truncate max-w-[200px]">
-              {canvas.title}
-            </span>
-          </div>
+        <div className="flex items-center gap-2 min-w-0">
+          <Code size={16} className="text-blue-400 flex-shrink-0" />
+          <span className="text-sm font-semibold text-white truncate">
+            {canvas.title}
+          </span>
           {canvas.language && (
-            <span className="text-[10px] bg-[#1e1f20] border border-[#333] px-2 py-0.5 rounded text-gray-400 font-mono">
+            <span className="hidden sm:block text-[10px] bg-[#1e1f20] border border-[#333] px-2 py-0.5 rounded text-gray-400 font-mono flex-shrink-0">
               {canvas.language}
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Табы код/превью для HTML */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Табы для HTML */}
           {isHTML && (
             <div className="flex bg-[#1e1f20] rounded-lg p-0.5 border border-[#333]">
               <button
                 onClick={() => setActiveTab("code")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${
-                  activeTab === "code"
-                    ? "bg-[#2a2a2a] text-white"
-                    : "text-gray-500 hover:text-white"
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
+                  activeTab === "code" ? "bg-[#2a2a2a] text-white" : "text-gray-500"
                 }`}
               >
-                <Code size={12} />
-                Код
+                <Code size={11} />
+                <span className="hidden sm:block">Код</span>
               </button>
               <button
                 onClick={() => setActiveTab("preview")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${
-                  activeTab === "preview"
-                    ? "bg-[#2a2a2a] text-white"
-                    : "text-gray-500 hover:text-white"
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors ${
+                  activeTab === "preview" ? "bg-[#2a2a2a] text-white" : "text-gray-500"
                 }`}
               >
-                <Eye size={12} />
-                Превью
+                <Eye size={11} />
+                <span className="hidden sm:block">Превью</span>
               </button>
             </div>
           )}
 
-          {/* Кнопка копировать */}
+          {/* Копировать */}
           <button
             onClick={handleCopy}
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white border border-[#333] hover:border-[#555] px-3 py-1.5 rounded-lg transition-all"
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white border border-[#333] px-2 sm:px-3 py-1.5 rounded-lg transition-all"
           >
             {copied
-              ? <><Check size={12} className="text-green-400" /> Скопировано</>
-              : <><Copy size={12} /> Копировать</>
+              ? <><Check size={12} className="text-green-400" /><span className="hidden sm:block">Скопировано</span></>
+              : <><Copy size={12} /><span className="hidden sm:block">Копировать</span></>
             }
           </button>
 
@@ -138,7 +112,6 @@ export default function Canvas({ canvas, onClose }: Props) {
       {/* Контент */}
       <div className="flex-1 overflow-hidden">
         {activeTab === "preview" && isHTML ? (
-          // HTML превью
           <iframe
             srcDoc={editableContent}
             className="w-full h-full bg-white"
@@ -146,14 +119,12 @@ export default function Canvas({ canvas, onClose }: Props) {
             title="preview"
           />
         ) : canvas.type === "text" ? (
-          // Текстовый режим
           <textarea
             value={editableContent}
             onChange={(e) => setEditableContent(e.target.value)}
             className="w-full h-full bg-[#0f0f0f] text-gray-300 p-6 resize-none focus:outline-none font-sans text-base leading-relaxed"
           />
         ) : (
-          // Редактор кода
           <div className="h-full overflow-auto">
             <CodeMirrorEditor
               value={editableContent}
@@ -167,12 +138,7 @@ export default function Canvas({ canvas, onClose }: Props) {
   )
 }
 
-// Отдельный компонент для CodeMirror
-function CodeMirrorEditor({
-  value,
-  language,
-  onChange
-}: {
+function CodeMirrorEditor({ value, language, onChange }: {
   value: string
   language: string
   onChange: (v: string) => void
@@ -182,7 +148,7 @@ function CodeMirrorEditor({
   useEffect(() => {
     const load = async () => {
       const exts: any[] = []
-      if (language === "javascript" || language === "js" || language === "typescript") {
+      if (["javascript", "js", "typescript"].includes(language)) {
         const { javascript } = await import("@codemirror/lang-javascript")
         exts.push(javascript({ typescript: language === "typescript" }))
       } else if (language === "html") {
